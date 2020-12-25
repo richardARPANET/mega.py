@@ -13,6 +13,7 @@ import random
 import binascii
 import tempfile
 import shutil
+from tqdm import *
 
 import requests
 from tenacity import retry, wait_exponential, retry_if_exception_type
@@ -694,6 +695,9 @@ class Mega:
 
         input_file = requests.get(file_url, stream=True).raw
 
+        total_size_in_bytes= int(input_file.headers.get('content-length', 0))
+        progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True)
+
         if dest_path is None:
             dest_path = ''
         else:
@@ -715,6 +719,7 @@ class Mega:
             for chunk_start, chunk_size in get_chunks(file_size):
                 chunk = input_file.read(chunk_size)
                 chunk = aes.decrypt(chunk)
+                progress_bar.update(chunk_size)
                 temp_output_file.write(chunk)
 
                 encryptor = AES.new(k_str, AES.MODE_CBC, iv_str)
@@ -736,6 +741,7 @@ class Mega:
                 file_info = os.stat(temp_output_file.name)
                 logger.info('%s of %s downloaded', file_info.st_size,
                             file_size)
+            progress_bar.close()
             file_mac = str_to_a32(mac_str)
             # check mac integrity
             if (file_mac[0] ^ file_mac[1],
