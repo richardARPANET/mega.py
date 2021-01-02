@@ -561,12 +561,15 @@ class Mega:
         """
         Download a file by it's file object
         """
-        return self._download_file(file_handle=None,
+        temp_output_file,output_path=self._download_file(file_handle=None,
                                    file_key=None,
                                    file=file[1],
                                    dest_path=dest_path,
                                    dest_filename=dest_filename,
                                    is_public=False)
+        shutil.move(temp_output_file.name, output_path)
+        
+        return temp_output_file
 
     def _export_file(self, node):
         node_data = self._node_data(node)
@@ -643,7 +646,7 @@ class Mega:
             dest_path=dest_path,
             dest_filename=dest_filename,
             is_public=True,
-        )
+        )[0]
 
     def _download_file(self,
                        file_handle,
@@ -742,8 +745,8 @@ class Mega:
                     file_mac[2] ^ file_mac[3]) != meta_mac:
                 raise ValueError('Mismatched mac')
             output_path = Path(dest_path + file_name)
-            shutil.move(temp_output_file.name, output_path)
-            return output_path
+            # shutil.move(temp_output_file.name, output_path)
+            return output_path,temp_output_file.name
 
     def upload(self, filename, dest=None, dest_filename=None):
         # determine storage node
