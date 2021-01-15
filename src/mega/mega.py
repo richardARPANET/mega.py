@@ -170,6 +170,7 @@ class Mega:
             timeout=self.timeout,
         )
         json_resp = json.loads(response.text)
+        int_resp = None
         try:
             if isinstance(json_resp, list):
                 int_resp = json_resp[0] if isinstance(json_resp[0],
@@ -630,7 +631,7 @@ class Mega:
         nodes = self.get_files()
         return self.get_folder_link(nodes[node_id])
 
-    def download_url(self, url, dest_path=None, dest_filename=None):
+    def download_url(self, url, dest_path=None, dest_filename=None, progress_hook=None, progress_args=None):
         """
         Download a file by it's public url
         """
@@ -643,6 +644,8 @@ class Mega:
             dest_path=dest_path,
             dest_filename=dest_filename,
             is_public=True,
+            progress_hook=progress_hook,
+            progress_args=progress_args,
         )
 
     def _download_file(self,
@@ -651,7 +654,9 @@ class Mega:
                        dest_path=None,
                        dest_filename=None,
                        is_public=False,
-                       file=None):
+                       file=None,
+                       progress_hook=None,
+                       progress_args=None):
         if file is None:
             if is_public:
                 file_key = base64_to_a32(file_key)
@@ -736,13 +741,31 @@ class Mega:
                 file_info = os.stat(temp_output_file.name)
                 logger.info('%s of %s downloaded', file_info.st_size,
                             file_size)
+                if progress_hook:
+                    progress_hook({
+                        'current': file_info.st_size,
+                        'total': file_size,
+                        'name': file_name,
+                        'status': 'downloading',
+                        'args': progress_args
+                    })
             file_mac = str_to_a32(mac_str)
             # check mac integrity
             if (file_mac[0] ^ file_mac[1],
                     file_mac[2] ^ file_mac[3]) != meta_mac:
                 raise ValueError('Mismatched mac')
             output_path = Path(dest_path + file_name)
+            temp_output_file.close()
             shutil.move(temp_output_file.name, output_path)
+            if progress_hook:
+                file_info = os.stat(temp_output_file.name)
+                progress_hook({
+                    'current': file_info.st_size,
+                    'total': file_size,
+                    'name': temp_output_file.name,
+                    'status': 'finished',
+                    'args': progress_args
+                })
             return output_path
 
     def upload(self, filename, dest=None, dest_filename=None):
