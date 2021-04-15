@@ -13,6 +13,7 @@ import random
 import binascii
 import tempfile
 import shutil
+import httpx
 
 import requests
 from tenacity import retry, wait_exponential, retry_if_exception_type
@@ -36,7 +37,7 @@ class Mega:
         self.sequence_num = random.randint(0, 0xFFFFFFFF)
         self.request_id = make_id(10)
         self._trash_folder_node_id = None
-
+        self.client = httpx.AsyncClient()
         if options is None:
             options = {}
         self.options = options
@@ -163,6 +164,7 @@ class Mega:
             data = [data]
 
         url = f'{self.schema}://g.api.{self.domain}/cs'
+
         response = requests.post(
             url,
             params=params,
@@ -286,7 +288,7 @@ class Mega:
                 shared_keys[s_item['u']][s_item['h']] = ok_dict[s_item['h']]
         self.shared_keys = shared_keys
 
-    def find_path_descriptor(self, path, files=()):
+    def find_path_descriptor(self, path, parent = None, files=()):
         """
         Find descriptor of folder inside a path. i.e.: folder1/folder2/folder3
         Params:
@@ -297,16 +299,17 @@ class Mega:
         paths = path.split('/')
 
         files = files or self.get_files()
-        parent_desc = self.root_id
+        parent_desc = self.root_id if parent is None else parent
         found = False
         for foldername in paths:
             if foldername != '':
                 for file in files.items():
-                    if (file[1]['a'] and file[1]['t']
-                            and file[1]['a']['n'] == foldername):
+
+                    if (file[1]['a'] and file[1]['t'] and file[1]['a']['n'] == foldername):
                         if parent_desc == file[1]['p']:
                             parent_desc = file[0]
                             found = True
+                            break
                 if found:
                     found = False
                 else:
@@ -745,7 +748,7 @@ class Mega:
             shutil.move(temp_output_file.name, output_path)
             return output_path
 
-    def upload(self, filename, dest=None, dest_filename=None):
+    async def upload(self, filename, dest=None, dest_filename=None):
         # determine storage node
         if dest is None:
             # if none set, upload to cloud drive node
@@ -757,7 +760,6 @@ class Mega:
         with open(filename, 'rb') as input_file:
             file_size = os.path.getsize(filename)
             ul_url = self._api_request({'a': 'u', 's': file_size})['p']
-
             # generate random aes key (128) for file
             ul_key = [random.randint(0, 0xFFFFFFFF) for _ in range(6)]
             k_str = a32_to_str(ul_key[:4])
@@ -795,7 +797,8 @@ class Mega:
 
                     # encrypt file and upload
                     chunk = aes.encrypt(chunk)
-                    output_file = requests.post(ul_url + "/" +
+                    async with self.client as client:
+                        output_file = await client.post(ul_url + "/" +
                                                 str(chunk_start),
                                                 data=chunk,
                                                 timeout=self.timeout)
@@ -803,7 +806,8 @@ class Mega:
                     logger.info('%s of %s uploaded', upload_progress,
                                 file_size)
             else:
-                output_file = requests.post(ul_url + "/0",
+                async with self.client:
+                    output_file = await client.post(ul_url + "/0",
                                             data='',
                                             timeout=self.timeout)
                 completion_file_handle = output_file.text
@@ -881,7 +885,7 @@ class Mega:
         dirs = tuple(dir_name for dir_name in str(name).split('/') if dir_name)
         folder_node_ids = {}
         for idx, directory_name in enumerate(dirs):
-            existing_node_id = self.find_path_descriptor(directory_name)
+            existing_node_id = self.find_path_descriptor(directory_name,parent = folder_node_ids[idx-1] if idx else None)
             if existing_node_id:
                 folder_node_ids[idx] = existing_node_id
                 continue
